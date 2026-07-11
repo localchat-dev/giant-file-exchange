@@ -7,7 +7,10 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-pub const DEFAULT_API_BASE_URL: &str = "https://example.invalid";
+pub const DEFAULT_API_BASE_URL: &str = match option_env!("GFE_DEFAULT_API_BASE_URL") {
+    Some(value) => value,
+    None => "https://example.invalid",
+};
 pub const DEFAULT_HOTKEY: &str = "Ctrl+Alt+U";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -16,7 +19,6 @@ pub struct AppSettings {
     pub api_base_url: String,
     pub encrypted_token: String,
     pub receiver_users: Vec<String>,
-    pub exchange_type: u8,
     pub hotkey: String,
 }
 
@@ -26,7 +28,6 @@ impl Default for AppSettings {
             api_base_url: DEFAULT_API_BASE_URL.to_owned(),
             encrypted_token: String::new(),
             receiver_users: Vec::new(),
-            exchange_type: 2,
             hotkey: DEFAULT_HOTKEY.to_owned(),
         }
     }
@@ -59,9 +60,6 @@ impl AppSettings {
         }
         if self.receiver_users.is_empty() {
             bail!("请至少填写一个接收人的域账号");
-        }
-        if !matches!(self.exchange_type, 1 | 2) {
-            bail!("传输方向无效");
         }
         validate_hotkey_text(&self.hotkey)?;
         Ok(())

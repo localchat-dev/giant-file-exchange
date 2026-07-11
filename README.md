@@ -19,8 +19,7 @@ Windows 11 的经典右键菜单入口通常位于“显示更多选项”中。
 
 1. 将 `GiantFileExchange.exe` 放到一个固定位置并运行。
 2. 在“设置”页填写 API 基地址、个人令牌以及一个或多个默认接收人。
-3. 确认传输方向。默认是“办公网 → 研发内网”，即 `exchangeType=2`。
-4. 保存后，全局快捷键开始生效；首次运行还会为当前用户注册资源管理器右键菜单。
+3. 保存后，全局快捷键开始生效；首次运行还会为当前用户注册资源管理器右键菜单。
 
 关闭主窗口只会将应用隐藏到托盘。要彻底结束应用，请使用托盘菜单中的“退出”；仍有任务时会要求确认。应用退出或异常关闭后不会恢复未完成任务。
 
@@ -32,6 +31,18 @@ Windows 11 的经典右键菜单入口通常位于“显示更多选项”中。
 
 - Windows 10/11 x64
 - Rust stable，MSVC 工具链
+
+首次构建前复制环境变量示例，并在本地 `.env` 中填写实际 API 地址：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+```dotenv
+GFE_DEFAULT_API_BASE_URL=https://example.invalid
+```
+
+`.env` 已加入 `.gitignore`，不会提交到仓库；`.env.example` 只保留脱敏占位地址。构建时也可以通过同名系统环境变量覆盖 `.env`。
 
 ```powershell
 cargo check
@@ -61,7 +72,11 @@ powershell -ExecutionPolicy Bypass -File scripts/build-release.ps1
 - multipart 字段：重复的 `receiverUser`、`file`、`exchangeType`
 - 认证头：`Authorization: Bear {个人令牌}`
 
+应用仅用于外网环境，上传方向固定为“办公网 → 研发内网”（`exchangeType=2`），不提供方向切换设置。
+
 公司接口使用的是 `Bear`，不是标准 OAuth 常见的 `Bearer`。应用会自动纠正用户粘贴令牌时附带的 `Bear` 或 `Bearer` 前缀。
+
+API 基地址在构建时由 `.env` 的 `GFE_DEFAULT_API_BASE_URL` 注入；若没有提供，则程序默认显示 `https://example.invalid`，需要用户在设置页手动填写。
 
 日志不会记录个人令牌或选中文本内容。上传任务不跨进程保存；失败的文本临时文件会保留到重试、移除或退出，其他文本临时文件会在任务结束时清理。
 

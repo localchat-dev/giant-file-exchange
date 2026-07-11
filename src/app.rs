@@ -19,6 +19,17 @@ use crate::{
     },
 };
 
+const APP_BACKGROUND: Color32 = Color32::from_rgb(244, 247, 251);
+const SIDEBAR_BACKGROUND: Color32 = Color32::from_rgb(20, 30, 48);
+const SIDEBAR_SELECTED: Color32 = Color32::from_rgb(37, 99, 235);
+const CARD_BACKGROUND: Color32 = Color32::from_rgb(255, 255, 255);
+const BORDER_COLOR: Color32 = Color32::from_rgb(224, 230, 239);
+const TEXT_PRIMARY: Color32 = Color32::from_rgb(24, 35, 52);
+const TEXT_MUTED: Color32 = Color32::from_rgb(102, 116, 139);
+const ACCENT: Color32 = Color32::from_rgb(37, 99, 235);
+const SUCCESS: Color32 = Color32::from_rgb(22, 130, 70);
+const DANGER: Color32 = Color32::from_rgb(185, 28, 28);
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Page {
     Transfers,
@@ -29,7 +40,6 @@ struct SettingsForm {
     api_base_url: String,
     token: String,
     receivers: String,
-    exchange_type: u8,
     hotkey: String,
 }
 
@@ -39,7 +49,6 @@ impl From<&AppSettings> for SettingsForm {
             api_base_url: settings.api_base_url.clone(),
             token: String::new(),
             receivers: settings.receiver_users.join("\n"),
-            exchange_type: settings.exchange_type,
             hotkey: settings.hotkey.clone(),
         }
     }
@@ -141,7 +150,6 @@ impl FileExchangeApp {
             api_base_url: self.settings.api_base_url.clone(),
             token,
             receiver_users: self.settings.receiver_users.clone(),
-            exchange_type: self.settings.exchange_type,
         })
     }
 
@@ -177,7 +185,6 @@ impl FileExchangeApp {
                 .to_owned(),
             encrypted_token: self.settings.encrypted_token.clone(),
             receiver_users: receivers,
-            exchange_type: self.form.exchange_type,
             hotkey: self.form.hotkey.trim().to_owned(),
         };
         if !self.form.token.trim().is_empty() {
@@ -344,107 +351,225 @@ impl FileExchangeApp {
     }
 
     fn transfers_ui(&mut self, ui: &mut egui::Ui) {
+        let total = self.queue.tasks().len();
+        let active = self.queue.active_count();
+        let succeeded = self
+            .queue
+            .tasks()
+            .iter()
+            .filter(|task| task.status == UploadStatus::Succeeded)
+            .count();
+        let failed = self
+            .queue
+            .tasks()
+            .iter()
+            .filter(|task| task.status == UploadStatus::Failed)
+            .count();
+
         ui.horizontal(|ui| {
-            if ui.button("添加文件").clicked()
-                && let Some(files) = rfd::FileDialog::new()
-                    .set_title("选择要上传的文件")
-                    .pick_files()
-            {
-                self.accept_files(files);
-            }
-            let total = self.queue.tasks().len();
-            let active = self.queue.active_count();
-            ui.separator();
-            ui.label(if total == 0 {
-                "暂无任务".to_owned()
-            } else {
-                format!("共 {total} 个任务，{active} 个正在处理")
+            ui.vertical(|ui| {
+                ui.label(
+                    RichText::new("上传任务")
+                        .size(26.0)
+                        .strong()
+                        .color(TEXT_PRIMARY),
+                );
+                ui.label(
+                    RichText::new("查看文件传输进度与处理结果")
+                        .size(13.0)
+                        .color(TEXT_MUTED),
+                );
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let button =
+                    egui::Button::new(RichText::new("＋  添加文件").strong().color(Color32::WHITE))
+                        .fill(ACCENT)
+                        .stroke(egui::Stroke::NONE)
+                        .corner_radius(8);
+                if ui.add_sized([116.0, 38.0], button).clicked()
+                    && let Some(files) = rfd::FileDialog::new()
+                        .set_title("选择要上传的文件")
+                        .pick_files()
+                {
+                    self.accept_files(files);
+                }
             });
         });
-        ui.add_space(8.0);
+        ui.add_space(18.0);
 
-        let mut action = None;
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for task in self.queue.tasks() {
-                egui::Frame::group(ui.style()).show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.set_min_width(210.0);
-                            ui.label(RichText::new(&task.file_name).strong());
-                            ui.label(
-                                RichText::new(format_bytes(task.file_size))
-                                    .small()
-                                    .color(Color32::GRAY),
-                            );
-                        });
-                        ui.vertical(|ui| {
-                            ui.set_min_width(300.0);
-                            ui.add(egui::ProgressBar::new(task.progress()).show_percentage());
-                            let progress = format!(
-                                "{} / {}",
-                                format_bytes(task.bytes_sent),
-                                format_bytes(task.file_size)
-                            );
-                            let speed = if task.status == UploadStatus::Uploading {
-                                format!(
-                                    "  ·  {}/s",
-                                    format_bytes(task.speed_bytes_per_second.max(0.0) as u64)
-                                )
-                            } else {
-                                String::new()
-                            };
-                            ui.label(
-                                RichText::new(format!("{progress}{speed}"))
-                                    .small()
-                                    .color(Color32::GRAY),
-                            );
-                        });
-                        ui.vertical(|ui| {
-                            ui.set_min_width(130.0);
-                            let color = match task.status {
-                                UploadStatus::Succeeded => Color32::from_rgb(22, 130, 70),
-                                UploadStatus::Failed => Color32::from_rgb(185, 28, 28),
-                                UploadStatus::Cancelled => Color32::GRAY,
-                                _ => Color32::from_rgb(37, 99, 235),
-                            };
-                            ui.label(RichText::new(task.status.text()).strong().color(color));
-                            if let Some(id) = &task.server_file_id {
-                                ui.label(RichText::new(format!("ID: {id}")).small());
-                            }
-                            if !task.error.is_empty() {
-                                ui.label(
-                                    RichText::new(&task.error)
-                                        .small()
-                                        .color(Color32::from_rgb(185, 28, 28)),
-                                );
-                            }
-                        });
-                        ui.vertical(|ui| {
-                            if ui
-                                .add_enabled(task.status.is_active(), egui::Button::new("取消"))
-                                .clicked()
-                            {
-                                action = Some(("cancel", task.id));
-                            }
-                            if ui
-                                .add_enabled(task.status.can_retry(), egui::Button::new("重试"))
-                                .clicked()
-                            {
-                                action = Some(("retry", task.id));
-                            }
-                            if ui
-                                .add_enabled(!task.status.is_active(), egui::Button::new("移除"))
-                                .clicked()
-                            {
-                                action = Some(("remove", task.id));
-                            }
-                        });
-                    });
-                });
-                ui.add_space(6.0);
+        ui.columns(3, |columns| {
+            metric_card(&mut columns[0], "任务总数", total, "本次运行", ACCENT);
+            metric_card(
+                &mut columns[1],
+                "正在处理",
+                active,
+                "顺序上传",
+                Color32::from_rgb(217, 119, 6),
+            );
+            let result_caption = if failed == 0 {
+                "全部正常".to_owned()
+            } else {
+                format!("{failed} 个失败")
+            };
+            metric_card(
+                &mut columns[2],
+                "已完成",
+                succeeded,
+                &result_caption,
+                SUCCESS,
+            );
+        });
+        ui.add_space(18.0);
+
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("传输列表")
+                    .size(16.0)
+                    .strong()
+                    .color(TEXT_PRIMARY),
+            );
+            if total > 0 {
+                ui.label(
+                    RichText::new(format!("{active} 个活动任务"))
+                        .small()
+                        .color(TEXT_MUTED),
+                );
             }
         });
+        ui.add_space(10.0);
+
+        let mut action = None;
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for task in self.queue.tasks() {
+                    egui::Frame::new()
+                        .fill(CARD_BACKGROUND)
+                        .stroke(egui::Stroke::new(1.0, BORDER_COLOR))
+                        .corner_radius(10)
+                        .inner_margin(16)
+                        .show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                egui::Frame::new()
+                                    .fill(Color32::from_rgb(235, 241, 255))
+                                    .corner_radius(8)
+                                    .inner_margin(10)
+                                    .show(ui, |ui| {
+                                        ui.label(
+                                            RichText::new("↑").size(20.0).strong().color(ACCENT),
+                                        );
+                                    });
+                                ui.vertical(|ui| {
+                                    ui.label(
+                                        RichText::new(&task.file_name)
+                                            .size(15.0)
+                                            .strong()
+                                            .color(TEXT_PRIMARY),
+                                    );
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "{}  ·  外网 → 内网",
+                                            format_bytes(task.file_size)
+                                        ))
+                                        .small()
+                                        .color(TEXT_MUTED),
+                                    );
+                                });
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        let (foreground, background) = status_colors(task.status);
+                                        egui::Frame::new()
+                                            .fill(background)
+                                            .corner_radius(10)
+                                            .inner_margin(egui::Margin::symmetric(10, 5))
+                                            .show(ui, |ui| {
+                                                ui.label(
+                                                    RichText::new(task.status.text())
+                                                        .small()
+                                                        .strong()
+                                                        .color(foreground),
+                                                );
+                                            });
+                                    },
+                                );
+                            });
+                            ui.add_space(12.0);
+                            ui.add(
+                                egui::ProgressBar::new(task.progress())
+                                    .desired_height(8.0)
+                                    .fill(status_colors(task.status).0)
+                                    .animate(task.status == UploadStatus::Uploading),
+                            );
+                            ui.add_space(8.0);
+                            ui.horizontal(|ui| {
+                                let progress = format!(
+                                    "{} / {}",
+                                    format_bytes(task.bytes_sent),
+                                    format_bytes(task.file_size)
+                                );
+                                ui.label(RichText::new(progress).small().color(TEXT_MUTED));
+                                if task.status == UploadStatus::Uploading {
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "{}/s",
+                                            format_bytes(
+                                                task.speed_bytes_per_second.max(0.0) as u64
+                                            )
+                                        ))
+                                        .small()
+                                        .color(TEXT_MUTED),
+                                    );
+                                }
+                                if let Some(id) = &task.server_file_id {
+                                    ui.label(
+                                        RichText::new(format!("文件 ID：{id}"))
+                                            .small()
+                                            .color(TEXT_MUTED),
+                                    );
+                                }
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui
+                                            .add_enabled(
+                                                !task.status.is_active(),
+                                                egui::Button::new("移除"),
+                                            )
+                                            .clicked()
+                                        {
+                                            action = Some(("remove", task.id));
+                                        }
+                                        if ui
+                                            .add_enabled(
+                                                task.status.can_retry(),
+                                                egui::Button::new("重试"),
+                                            )
+                                            .clicked()
+                                        {
+                                            action = Some(("retry", task.id));
+                                        }
+                                        if ui
+                                            .add_enabled(
+                                                task.status.is_active(),
+                                                egui::Button::new("取消"),
+                                            )
+                                            .clicked()
+                                        {
+                                            action = Some(("cancel", task.id));
+                                        }
+                                    },
+                                );
+                            });
+                            if !task.error.is_empty() {
+                                ui.add_space(6.0);
+                                ui.label(RichText::new(&task.error).small().color(DANGER));
+                            }
+                        });
+                    ui.add_space(10.0);
+                }
+            });
         if let Some((name, id)) = action {
             match name {
                 "cancel" => self.queue.cancel(id),
@@ -458,79 +583,182 @@ impl FileExchangeApp {
             }
         }
         if self.queue.tasks().is_empty() {
-            ui.vertical_centered(|ui| {
-                ui.add_space(80.0);
-                ui.heading("还没有上传任务");
-                ui.label("可以点击“添加文件”，或在资源管理器右键菜单中上传文件。");
-            });
+            egui::Frame::new()
+                .fill(CARD_BACKGROUND)
+                .stroke(egui::Stroke::new(1.0, BORDER_COLOR))
+                .corner_radius(12)
+                .inner_margin(32)
+                .show(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.vertical_centered(|ui| {
+                        ui.add_space(30.0);
+                        ui.label(RichText::new("↑").size(36.0).color(ACCENT));
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new("还没有上传任务")
+                                .size(18.0)
+                                .strong()
+                                .color(TEXT_PRIMARY),
+                        );
+                        ui.label(
+                            RichText::new("添加文件，或通过资源管理器右键菜单快速上传")
+                                .color(TEXT_MUTED),
+                        );
+                        ui.add_space(30.0);
+                    });
+                });
         }
     }
 
     fn settings_ui(&mut self, ui: &mut egui::Ui) {
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.set_max_width(680.0);
-            ui.heading("上传设置");
-            ui.add_space(10.0);
-            ui.label("API 基地址");
-            ui.text_edit_singleline(&mut self.form.api_base_url);
-            ui.add_space(8.0);
-            ui.label("个人令牌（留空表示不修改）");
-            ui.add(egui::TextEdit::singleline(&mut self.form.token).password(true));
-            ui.add_space(8.0);
-            ui.label("默认接收人域账号（每行一个）");
-            ui.add(egui::TextEdit::multiline(&mut self.form.receivers).desired_rows(5));
-            ui.add_space(8.0);
-            ui.label("默认传输方向");
-            ui.horizontal(|ui| {
-                ui.radio_value(&mut self.form.exchange_type, 1, "研发内网 → 办公网");
-                ui.radio_value(&mut self.form.exchange_type, 2, "办公网 → 研发内网");
+        ui.label(
+            RichText::new("设置")
+                .size(26.0)
+                .strong()
+                .color(TEXT_PRIMARY),
+        );
+        ui.label(
+            RichText::new("管理身份认证、默认接收人和系统集成")
+                .size(13.0)
+                .color(TEXT_MUTED),
+        );
+        ui.add_space(18.0);
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let card_width = ui.available_width().min(720.0);
+                let content_width = (card_width - 40.0).max(240.0);
+                ui.set_width(card_width);
+                ui.set_max_width(card_width);
+                egui::Frame::new()
+                    .fill(CARD_BACKGROUND)
+                    .stroke(egui::Stroke::new(1.0, BORDER_COLOR))
+                    .corner_radius(12)
+                    .inner_margin(20)
+                    .show(ui, |ui| {
+                        ui.set_width(content_width);
+                        ui.set_max_width(content_width);
+                        ui.label(
+                            RichText::new("上传配置")
+                                .size(17.0)
+                                .strong()
+                                .color(TEXT_PRIMARY),
+                        );
+                        ui.label(
+                            RichText::new("用于连接文件交换服务并指定接收人")
+                                .small()
+                                .color(TEXT_MUTED),
+                        );
+                        ui.add_space(16.0);
+
+                        form_label(ui, "API 基地址", "由构建时 .env 提供，可在本机覆盖");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.form.api_base_url)
+                                .desired_width(content_width)
+                                .hint_text("https://example.invalid"),
+                        );
+                        ui.add_space(12.0);
+                        form_label(ui, "个人令牌", "留空表示继续使用已保存的令牌");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.form.token)
+                                .desired_width(content_width)
+                                .password(true)
+                                .hint_text("输入个人令牌"),
+                        );
+                        ui.add_space(12.0);
+                        form_label(ui, "默认接收人", "每行填写一个域账号，可同时发送给多人");
+                        ui.add(
+                            egui::TextEdit::multiline(&mut self.form.receivers)
+                                .desired_width(content_width)
+                                .desired_rows(5)
+                                .hint_text("zhangsan\nlisi"),
+                        );
+                        ui.add_space(12.0);
+                        form_label(ui, "选中文本上传快捷键", "应用驻留托盘时全局生效");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.form.hotkey)
+                                .desired_width(content_width)
+                                .hint_text("Ctrl+Alt+U"),
+                        );
+                        ui.add_space(18.0);
+                        let save = egui::Button::new(
+                            RichText::new("保存配置").strong().color(Color32::WHITE),
+                        )
+                        .fill(ACCENT)
+                        .stroke(egui::Stroke::NONE)
+                        .corner_radius(8);
+                        if ui.add_sized([112.0, 38.0], save).clicked() {
+                            self.save_settings();
+                        }
+                    });
+                ui.add_space(14.0);
+                egui::Frame::new()
+                    .fill(CARD_BACKGROUND)
+                    .stroke(egui::Stroke::new(1.0, BORDER_COLOR))
+                    .corner_radius(12)
+                    .inner_margin(20)
+                    .show(ui, |ui| {
+                        ui.set_width(content_width);
+                        ui.set_max_width(content_width);
+                        ui.label(
+                            RichText::new("资源管理器集成")
+                                .size(17.0)
+                                .strong()
+                                .color(TEXT_PRIMARY),
+                        );
+                        ui.label(
+                            RichText::new(if self.shell_registered {
+                                "右键菜单已指向当前程序路径"
+                            } else {
+                                "右键菜单未注册，或程序位置已经变化"
+                            })
+                            .small()
+                            .color(if self.shell_registered {
+                                SUCCESS
+                            } else {
+                                DANGER
+                            }),
+                        );
+                        ui.add_space(12.0);
+                        ui.horizontal(|ui| {
+                            if ui.button("注册 / 修复").clicked() {
+                                match register_context_menu() {
+                                    Ok(()) => self.set_info("右键菜单已注册"),
+                                    Err(error) => self.set_error(error.to_string()),
+                                }
+                                self.shell_registered = is_context_menu_registered();
+                            }
+                            if ui.button("移除菜单").clicked() {
+                                match unregister_context_menu() {
+                                    Ok(()) => self.set_info("右键菜单已移除"),
+                                    Err(error) => self.set_error(error.to_string()),
+                                }
+                                self.shell_registered = is_context_menu_registered();
+                            }
+                        });
+                        ui.add_space(16.0);
+                        ui.separator();
+                        ui.add_space(12.0);
+                        ui.label(
+                            RichText::new(format!(
+                                "配置文件  {}",
+                                self.settings_store.path().display()
+                            ))
+                            .small()
+                            .color(TEXT_MUTED),
+                        );
+                        ui.label(
+                            RichText::new("关闭窗口后应用继续驻留托盘；不会创建开机启动项")
+                                .small()
+                                .color(TEXT_MUTED),
+                        );
+                        ui.label(
+                            RichText::new("传输方向固定为：办公网 → 研发内网")
+                                .small()
+                                .color(TEXT_MUTED),
+                        );
+                    });
             });
-            ui.add_space(8.0);
-            ui.label("选中文本上传快捷键");
-            ui.text_edit_singleline(&mut self.form.hotkey);
-            if ui.button("保存设置").clicked() {
-                self.save_settings();
-            }
-            ui.add_space(18.0);
-            ui.separator();
-            ui.add_space(12.0);
-            ui.heading("资源管理器右键菜单");
-            ui.label(if self.shell_registered {
-                "右键菜单已注册到当前程序路径。"
-            } else {
-                "右键菜单未注册，或便携程序的位置已经变化。"
-            });
-            ui.horizontal(|ui| {
-                if ui.button("注册 / 修复").clicked() {
-                    match register_context_menu() {
-                        Ok(()) => self.set_info("右键菜单已注册"),
-                        Err(error) => self.set_error(error.to_string()),
-                    }
-                    self.shell_registered = is_context_menu_registered();
-                }
-                if ui.button("移除菜单").clicked() {
-                    match unregister_context_menu() {
-                        Ok(()) => self.set_info("右键菜单已移除"),
-                        Err(error) => self.set_error(error.to_string()),
-                    }
-                    self.shell_registered = is_context_menu_registered();
-                }
-            });
-            ui.add_space(12.0);
-            ui.label(
-                RichText::new(format!(
-                    "配置文件：{}",
-                    self.settings_store.path().display()
-                ))
-                .small()
-                .color(Color32::GRAY),
-            );
-            ui.label(
-                RichText::new("应用不会创建开机启动项；关闭窗口后仍会驻留托盘。")
-                    .small()
-                    .color(Color32::GRAY),
-            );
-        });
     }
 }
 
@@ -558,37 +786,121 @@ impl eframe::App for FileExchangeApp {
 
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let context = root.ctx().clone();
-        egui::CentralPanel::default().show(root, |ui| {
-            ui.horizontal(|ui| {
-                ui.heading("文件交换助手");
-                ui.separator();
-                ui.selectable_value(&mut self.page, Page::Transfers, "上传任务");
-                ui.selectable_value(&mut self.page, Page::Settings, "设置");
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().fill(APP_BACKGROUND))
+            .show(root, |ui| {
+                let available_size = ui.available_size();
+                ui.allocate_ui_with_layout(
+                    available_size,
+                    egui::Layout::left_to_right(egui::Align::Min),
+                    |ui| {
+                        let available_height = ui.available_height();
+                        egui::Frame::new()
+                            .fill(SIDEBAR_BACKGROUND)
+                            .inner_margin(18)
+                            .show(ui, |ui| {
+                                ui.allocate_ui_with_layout(
+                                    egui::vec2(176.0, (available_height - 36.0).max(0.0)),
+                                    egui::Layout::top_down(egui::Align::Min),
+                                    |ui| {
+                                        ui.set_width(176.0);
+                                        ui.set_min_height((available_height - 36.0).max(0.0));
+                                        ui.horizontal(|ui| {
+                                            egui::Frame::new()
+                                                .fill(ACCENT)
+                                                .corner_radius(9)
+                                                .inner_margin(8)
+                                                .show(ui, |ui| {
+                                                    ui.label(
+                                                        RichText::new("↑")
+                                                            .size(18.0)
+                                                            .strong()
+                                                            .color(Color32::WHITE),
+                                                    );
+                                                });
+                                            ui.vertical(|ui| {
+                                                ui.label(
+                                                    RichText::new("文件交换")
+                                                        .size(17.0)
+                                                        .strong()
+                                                        .color(Color32::WHITE),
+                                                );
+                                                ui.label(
+                                                    RichText::new("外网上传助手")
+                                                        .small()
+                                                        .color(Color32::from_rgb(148, 163, 184)),
+                                                );
+                                            });
+                                        });
+                                        ui.add_space(28.0);
+
+                                        if sidebar_button(
+                                            ui,
+                                            "↑",
+                                            "上传任务",
+                                            self.page == Page::Transfers,
+                                        ) {
+                                            self.page = Page::Transfers;
+                                        }
+                                        ui.add_space(6.0);
+                                        if sidebar_button(
+                                            ui,
+                                            "⚙",
+                                            "设置",
+                                            self.page == Page::Settings,
+                                        ) {
+                                            self.page = Page::Settings;
+                                        }
+                                    },
+                                );
+                            });
+
+                        ui.add_space(6.0);
+                        ui.vertical(|ui| {
+                            ui.set_width(ui.available_width());
+                            ui.add_space(16.0);
+                            if let Some((message, is_error)) = &self.banner {
+                                let foreground = if *is_error { DANGER } else { SUCCESS };
+                                let background = if *is_error {
+                                    Color32::from_rgb(254, 242, 242)
+                                } else {
+                                    Color32::from_rgb(240, 253, 244)
+                                };
+                                let mut close_banner = false;
+                                egui::Frame::new()
+                                    .fill(background)
+                                    .stroke(egui::Stroke::new(1.0, foreground.gamma_multiply(0.25)))
+                                    .corner_radius(8)
+                                    .inner_margin(egui::Margin::symmetric(12, 8))
+                                    .show(ui, |ui| {
+                                        ui.set_width(ui.available_width());
+                                        ui.horizontal(|ui| {
+                                            ui.label(RichText::new(message).color(foreground));
+                                            ui.with_layout(
+                                                egui::Layout::right_to_left(egui::Align::Center),
+                                                |ui| {
+                                                    if ui.small_button("×").clicked() {
+                                                        close_banner = true;
+                                                    }
+                                                },
+                                            );
+                                        });
+                                    });
+                                if close_banner {
+                                    self.banner = None;
+                                }
+                                ui.add_space(10.0);
+                            }
+                            egui::Frame::new()
+                                .inner_margin(egui::Margin::symmetric(18, 4))
+                                .show(ui, |ui| match self.page {
+                                    Page::Transfers => self.transfers_ui(ui),
+                                    Page::Settings => self.settings_ui(ui),
+                                });
+                        });
+                    },
+                );
             });
-            ui.separator();
-            if let Some((message, is_error)) = &self.banner {
-                let color = if *is_error {
-                    Color32::from_rgb(185, 28, 28)
-                } else {
-                    Color32::from_rgb(22, 130, 70)
-                };
-                let mut close_banner = false;
-                ui.horizontal(|ui| {
-                    ui.colored_label(color, message);
-                    if ui.small_button("×").clicked() {
-                        close_banner = true;
-                    }
-                });
-                if close_banner {
-                    self.banner = None;
-                }
-                ui.separator();
-            }
-            match self.page {
-                Page::Transfers => self.transfers_ui(ui),
-                Page::Settings => self.settings_ui(ui),
-            }
-        });
 
         if self.confirm_exit {
             egui::Window::new("确认退出")
@@ -614,6 +926,84 @@ impl eframe::App for FileExchangeApp {
                 });
         }
     }
+}
+
+fn sidebar_button(ui: &mut egui::Ui, icon: &str, label: &str, selected: bool) -> bool {
+    let fill = if selected {
+        SIDEBAR_SELECTED
+    } else {
+        Color32::TRANSPARENT
+    };
+    let foreground = if selected {
+        Color32::WHITE
+    } else {
+        Color32::from_rgb(203, 213, 225)
+    };
+    ui.add_sized(
+        [ui.available_width(), 40.0],
+        egui::Button::new(
+            RichText::new(format!("{icon}   {label}"))
+                .strong()
+                .color(foreground),
+        )
+        .fill(fill)
+        .stroke(egui::Stroke::NONE)
+        .corner_radius(8),
+    )
+    .clicked()
+}
+
+fn metric_card(ui: &mut egui::Ui, label: &str, value: usize, caption: &str, accent: Color32) {
+    egui::Frame::new()
+        .fill(CARD_BACKGROUND)
+        .stroke(egui::Stroke::new(1.0, BORDER_COLOR))
+        .corner_radius(10)
+        .inner_margin(16)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(label).small().color(TEXT_MUTED));
+                    ui.label(
+                        RichText::new(value.to_string())
+                            .size(25.0)
+                            .strong()
+                            .color(TEXT_PRIMARY),
+                    );
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    egui::Frame::new()
+                        .fill(accent.gamma_multiply(0.1))
+                        .corner_radius(8)
+                        .inner_margin(8)
+                        .show(ui, |ui| {
+                            ui.label(RichText::new("●").color(accent));
+                        });
+                });
+            });
+            ui.label(RichText::new(caption).small().color(TEXT_MUTED));
+        });
+}
+
+fn status_colors(status: UploadStatus) -> (Color32, Color32) {
+    match status {
+        UploadStatus::Succeeded => (SUCCESS, Color32::from_rgb(236, 253, 245)),
+        UploadStatus::Failed => (DANGER, Color32::from_rgb(254, 242, 242)),
+        UploadStatus::Cancelled => (TEXT_MUTED, Color32::from_rgb(241, 245, 249)),
+        UploadStatus::Processing => (
+            Color32::from_rgb(126, 34, 206),
+            Color32::from_rgb(250, 245, 255),
+        ),
+        _ => (ACCENT, Color32::from_rgb(239, 246, 255)),
+    }
+}
+
+fn form_label(ui: &mut egui::Ui, label: &str, hint: &str) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(label).strong().color(TEXT_PRIMARY));
+        ui.label(RichText::new(hint).small().color(TEXT_MUTED));
+    });
+    ui.add_space(4.0);
 }
 
 fn show_window(context: &egui::Context) {
@@ -660,6 +1050,21 @@ fn make_icon() -> Result<Icon> {
 }
 
 fn configure_fonts(context: &egui::Context) {
+    let mut visuals = egui::Visuals::light();
+    visuals.panel_fill = APP_BACKGROUND;
+    visuals.window_fill = CARD_BACKGROUND;
+    visuals.extreme_bg_color = Color32::from_rgb(248, 250, 252);
+    visuals.widgets.inactive.corner_radius = 7.into();
+    visuals.widgets.hovered.corner_radius = 7.into();
+    visuals.widgets.active.corner_radius = 7.into();
+    context.set_visuals(visuals);
+
+    let mut style = (*context.style_of(egui::Theme::Light)).clone();
+    style.spacing.item_spacing = egui::vec2(8.0, 8.0);
+    style.spacing.button_padding = egui::vec2(12.0, 7.0);
+    style.spacing.interact_size.y = 34.0;
+    context.set_style_of(egui::Theme::Light, style);
+
     let windows = std::env::var_os("WINDIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));

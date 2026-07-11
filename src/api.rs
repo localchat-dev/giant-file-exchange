@@ -9,12 +9,13 @@ use tokio_util::io::ReaderStream;
 
 use crate::{config::authorization_header, logging::application_log};
 
+pub const EXCHANGE_TYPE_EXTERNAL_TO_INTERNAL: u8 = 2;
+
 #[derive(Clone)]
 pub struct UploadOptions {
     pub api_base_url: String,
     pub token: String,
     pub receiver_users: Vec<String>,
-    pub exchange_type: u8,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,10 +46,6 @@ impl ExchangeApiClient {
         if options.receiver_users.is_empty() {
             bail!("没有可用的接收人");
         }
-        if !matches!(options.exchange_type, 1 | 2) {
-            bail!("传输方向无效");
-        }
-
         let file = File::open(path).await.context("无法打开待上传文件")?;
         let total = file.metadata().await.context("无法读取文件大小")?.len();
         let mut sent = 0_u64;
@@ -71,9 +68,10 @@ impl ExchangeApiClient {
         for receiver in options.receiver_users {
             form = form.text("receiverUser", receiver);
         }
-        form = form
-            .part("file", file_part)
-            .text("exchangeType", options.exchange_type.to_string());
+        form = form.part("file", file_part).text(
+            "exchangeType",
+            EXCHANGE_TYPE_EXTERNAL_TO_INTERNAL.to_string(),
+        );
 
         let endpoint = format!(
             "{}/api/exchange/user/transfer/open/upload",
@@ -84,7 +82,7 @@ impl ExchangeApiClient {
             &format!(
                 "开始上传：file={}; size={total}; exchangeType={}",
                 path.display(),
-                options.exchange_type
+                EXCHANGE_TYPE_EXTERNAL_TO_INTERNAL
             ),
         );
         let response = self
@@ -240,7 +238,6 @@ mod tests {
                     api_base_url: format!("http://{address}"),
                     token: "secret-token".to_owned(),
                     receiver_users: vec!["alice".to_owned(), "bob".to_owned()],
-                    exchange_type: 2,
                 },
                 Arc::new(move |sent, _| {
                     progress_clone.store(sent, Ordering::Relaxed);
@@ -259,6 +256,7 @@ mod tests {
         assert!(request.contains("alice"));
         assert!(request.contains("bob"));
         assert!(request.contains("name=\"exchangetype\""));
+        assert!(request.contains("\r\n\r\n2\r\n"));
         assert!(request.contains("hello upload"));
     }
 }

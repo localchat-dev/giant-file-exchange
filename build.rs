@@ -1,4 +1,6 @@
 fn main() {
+    load_build_environment();
+
     #[cfg(windows)]
     {
         let mut resource = winresource::WindowsResource::new();
@@ -12,6 +14,39 @@ fn main() {
             println!("cargo:warning=无法写入 Windows 版本资源：{error}");
         }
     }
+}
+
+fn load_build_environment() {
+    const KEY: &str = "GFE_DEFAULT_API_BASE_URL";
+    println!("cargo:rerun-if-changed=.env");
+    println!("cargo:rerun-if-env-changed={KEY}");
+
+    let value = std::env::var(KEY)
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| read_dotenv_value(KEY));
+    let Some(value) = value else {
+        println!("cargo:warning=未找到 .env 中的 {KEY}，将使用脱敏占位地址");
+        return;
+    };
+    let value = value.trim().trim_matches(['\'', '"']);
+    assert!(
+        value.starts_with("https://") && !value.contains(['\r', '\n']),
+        "{KEY} 必须是有效的 HTTPS 地址"
+    );
+    println!("cargo:rustc-env={KEY}={value}");
+}
+
+fn read_dotenv_value(key: &str) -> Option<String> {
+    let contents = std::fs::read_to_string(".env").ok()?;
+    contents.lines().find_map(|line| {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            return None;
+        }
+        let (name, value) = line.split_once('=')?;
+        (name.trim() == key).then(|| value.trim().to_owned())
+    })
 }
 
 #[cfg(windows)]
