@@ -10,6 +10,7 @@ use tray_icon::{
 
 use crate::{
     api::UploadOptions,
+    branding::{ICON_SIZE, icon_rgba},
     config::{AppSettings, SettingsStore, app_data_dir, normalize_token},
     model::{UploadStatus, format_bytes},
     queue::UploadQueue,
@@ -150,6 +151,7 @@ impl FileExchangeApp {
             api_base_url: self.settings.api_base_url.clone(),
             token,
             receiver_users: self.settings.receiver_users.clone(),
+            upload_file_name: None,
         })
     }
 
@@ -310,13 +312,14 @@ impl FileExchangeApp {
     }
 
     fn enqueue_text(&mut self, result: TextCaptureResult) {
-        let options = match self.upload_options() {
+        let mut options = match self.upload_options() {
             Ok(options) => options,
             Err(error) => {
                 self.set_error(error.to_string());
                 return;
             }
         };
+        options.upload_file_name = Some("message.txt".to_owned());
         let directory = app_data_dir().join("Temp");
         if let Err(error) = fs::create_dir_all(&directory) {
             self.set_error(format!("无法创建文本临时目录：{error}"));
@@ -1033,20 +1036,7 @@ fn create_tray() -> Result<TrayState> {
 }
 
 fn make_icon() -> Result<Icon> {
-    let mut rgba = vec![0_u8; 32 * 32 * 4];
-    for y in 0..32 {
-        for x in 0..32 {
-            let index = (y * 32 + x) * 4;
-            let inside = (3..29).contains(&x) && (3..29).contains(&y);
-            if inside {
-                rgba[index..index + 4].copy_from_slice(&[37, 99, 235, 255]);
-                if (14..18).contains(&x) || ((10..22).contains(&x) && (17..21).contains(&y)) {
-                    rgba[index..index + 4].copy_from_slice(&[255, 255, 255, 255]);
-                }
-            }
-        }
-    }
-    Icon::from_rgba(rgba, 32, 32).map_err(|error| anyhow!(error.to_string()))
+    Icon::from_rgba(icon_rgba(), ICON_SIZE, ICON_SIZE).map_err(|error| anyhow!(error.to_string()))
 }
 
 fn configure_fonts(context: &egui::Context) {

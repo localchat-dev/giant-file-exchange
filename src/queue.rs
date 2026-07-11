@@ -89,7 +89,10 @@ impl UploadQueue {
             let id = self.next_id;
             self.next_id += 1;
             match UploadTask::new(id, path.clone(), temporary) {
-                Ok(task) => {
+                Ok(mut task) => {
+                    if let Some(file_name) = &options.upload_file_name {
+                        task.file_name = file_name.clone();
+                    }
                     self.tasks.push(task);
                     self.options.insert(
                         id,

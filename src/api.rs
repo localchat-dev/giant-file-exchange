@@ -16,6 +16,7 @@ pub struct UploadOptions {
     pub api_base_url: String,
     pub token: String,
     pub receiver_users: Vec<String>,
+    pub upload_file_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -55,11 +56,12 @@ impl ExchangeApiClient {
             progress(sent, total);
         });
         let body = reqwest::Body::wrap_stream(stream);
-        let file_name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("upload.bin")
-            .to_owned();
+        let file_name = options.upload_file_name.clone().unwrap_or_else(|| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("upload.bin")
+                .to_owned()
+        });
         let file_part = multipart::Part::stream_with_length(body, total)
             .file_name(file_name)
             .mime_str("application/octet-stream")?;
@@ -238,6 +240,7 @@ mod tests {
                     api_base_url: format!("http://{address}"),
                     token: "secret-token".to_owned(),
                     receiver_users: vec!["alice".to_owned(), "bob".to_owned()],
+                    upload_file_name: Some("message.txt".to_owned()),
                 },
                 Arc::new(move |sent, _| {
                     progress_clone.store(sent, Ordering::Relaxed);
@@ -257,6 +260,7 @@ mod tests {
         assert!(request.contains("bob"));
         assert!(request.contains("name=\"exchangetype\""));
         assert!(request.contains("\r\n\r\n2\r\n"));
+        assert!(request.contains("filename=\"message.txt\""));
         assert!(request.contains("hello upload"));
     }
 }

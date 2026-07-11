@@ -1,3 +1,6 @@
+#[path = "src/branding.rs"]
+mod branding;
+
 fn main() {
     load_build_environment();
 
@@ -55,40 +58,38 @@ fn create_icon() -> std::path::PathBuf {
 
     let path = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap())
         .join("GiantFileExchange.ico");
+    let size = branding::ICON_SIZE;
+    let rgba = branding::icon_rgba();
     let mut data = Vec::new();
     data.extend_from_slice(&[0, 0, 1, 0, 1, 0]);
-    let image_size = 40_u32 + 32 * 32 * 4 + 32 * 4;
-    data.extend_from_slice(&[32, 32, 0, 0]);
+    let mask_row_bytes = size.div_ceil(32) * 4;
+    let image_size = 40_u32 + size * size * 4 + mask_row_bytes * size;
+    data.extend_from_slice(&[size as u8, size as u8, 0, 0]);
     data.extend_from_slice(&1_u16.to_le_bytes());
     data.extend_from_slice(&32_u16.to_le_bytes());
     data.extend_from_slice(&image_size.to_le_bytes());
     data.extend_from_slice(&22_u32.to_le_bytes());
     data.extend_from_slice(&40_u32.to_le_bytes());
-    data.extend_from_slice(&32_i32.to_le_bytes());
-    data.extend_from_slice(&64_i32.to_le_bytes());
+    data.extend_from_slice(&(size as i32).to_le_bytes());
+    data.extend_from_slice(&((size * 2) as i32).to_le_bytes());
     data.extend_from_slice(&1_u16.to_le_bytes());
     data.extend_from_slice(&32_u16.to_le_bytes());
     data.extend_from_slice(&0_u32.to_le_bytes());
-    data.extend_from_slice(&(32_u32 * 32 * 4).to_le_bytes());
+    data.extend_from_slice(&(size * size * 4).to_le_bytes());
     data.extend_from_slice(&0_i32.to_le_bytes());
     data.extend_from_slice(&0_i32.to_le_bytes());
     data.extend_from_slice(&0_u32.to_le_bytes());
     data.extend_from_slice(&0_u32.to_le_bytes());
-    for y in (0..32).rev() {
-        for x in 0..32 {
-            let inside = (3..29).contains(&x) && (3..29).contains(&y);
-            let arrow = (14..18).contains(&x) || ((10..22).contains(&x) && (17..21).contains(&y));
-            let pixel = if inside && arrow {
-                [255, 255, 255, 255]
-            } else if inside {
-                [235, 99, 37, 255]
-            } else {
-                [0, 0, 0, 0]
+    for y in (0..size as usize).rev() {
+        for x in 0..size as usize {
+            let index = (y * size as usize + x) * 4;
+            let [red, green, blue, alpha] = rgba[index..index + 4] else {
+                unreachable!()
             };
-            data.extend_from_slice(&pixel);
+            data.extend_from_slice(&[blue, green, red, alpha]);
         }
     }
-    data.extend(std::iter::repeat_n(0_u8, 32 * 4));
+    data.extend(std::iter::repeat_n(0_u8, (mask_row_bytes * size) as usize));
     std::fs::File::create(&path)
         .unwrap()
         .write_all(&data)

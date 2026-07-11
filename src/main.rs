@@ -8,7 +8,11 @@ fn main() -> anyhow::Result<()> {
     use std::path::PathBuf;
 
     use giant_file_exchange::{
-        app::FileExchangeApp, config::SettingsStore, logging::crash_log, windows,
+        app::FileExchangeApp,
+        branding::{ICON_SIZE, icon_rgba},
+        config::SettingsStore,
+        logging::crash_log,
+        windows,
     };
     use single_instance::SingleInstance;
 
@@ -31,6 +35,11 @@ fn main() -> anyhow::Result<()> {
             .with_title("文件交换助手")
             .with_inner_size([940.0, 640.0])
             .with_min_inner_size([760.0, 500.0])
+            .with_icon(eframe::egui::IconData {
+                rgba: icon_rgba(),
+                width: ICON_SIZE,
+                height: ICON_SIZE,
+            })
             .with_visible(!start_hidden),
         ..Default::default()
     };
