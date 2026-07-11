@@ -1,0 +1,6 @@
+/target/
+/publish/
+/.idea/
+/.vs/
+*.user
+*.log
