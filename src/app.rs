@@ -1,4 +1,4 @@
-use std::{fs, path::PathBuf, sync::mpsc, thread, time::Duration};
+use std::{collections::HashMap, fs, path::PathBuf, sync::mpsc, thread, time::Duration};
 
 use anyhow::{Result, anyhow, bail};
 use eframe::egui::{self, Color32, RichText};
@@ -12,11 +12,13 @@ use crate::{
     api::UploadOptions,
     branding::{ICON_SIZE, icon_rgba},
     config::{AppSettings, SettingsStore, app_data_dir, normalize_token},
+    logging::application_log,
     model::{UploadStatus, format_bytes},
     queue::UploadQueue,
     windows::{
-        TextCaptureResult, capture_selected_text, is_context_menu_registered, protect_token,
-        register_context_menu, unprotect_token, unregister_context_menu,
+        SystemNotificationKind, TextCaptureResult, capture_selected_text,
+        is_context_menu_registered, protect_token, register_context_menu, show_tray_notification,
+        unprotect_token, unregister_context_menu,
     },
 };
 
@@ -73,6 +75,7 @@ pub struct FileExchangeApp {
     hotkey: Option<HotKey>,
     tray: Option<TrayState>,
     capture_rx: Option<mpsc::Receiver<Result<TextCaptureResult, String>>>,
+    task_statuses: HashMap<u64, UploadStatus>,
     banner: Option<(String, bool)>,
     shell_registered: bool,
     confirm_exit: bool,
@@ -105,6 +108,7 @@ impl FileExchangeApp {
             hotkey: None,
             tray,
             capture_rx: None,
+            task_statuses: HashMap::new(),
             banner: None,
             shell_registered: is_context_menu_registered(),
             confirm_exit: false,
@@ -141,6 +145,14 @@ impl FileExchangeApp {
         self.banner = Some((message.into(), false));
     }
 
+    fn notify_system(&self, title: &str, message: &str, kind: SystemNotificationKind) {
+        let Some(tray) = &self.tray else { return };
+        if let Err(error) = show_tray_notification(tray._icon.window_handle(), title, message, kind)
+        {
+            application_log("NOTIFY", &format!("系统通知发送失败：{error}"));
+        }
+    }
+
     fn upload_options(&self) -> Result<UploadOptions> {
         self.settings.validate_without_token()?;
         let token = unprotect_token(&self.settings.encrypted_token)?;
@@ -170,6 +182,11 @@ impl FileExchangeApp {
         let errors = self.queue.add_files(paths, false, options);
         if errors.is_empty() {
             self.set_info(format!("已加入 {count} 个文件，将按顺序上传"));
+            self.notify_system(
+                "文件已加入队列",
+                &format!("已加入 {count} 个文件，将按顺序上传"),
+                SystemNotificationKind::Info,
+            );
         } else {
             self.set_error(errors.join("\n"));
         }
@@ -339,8 +356,50 @@ impl FileExchangeApp {
             self.set_error(error.clone());
         } else if result.clipboard_restored {
             self.set_info("选中文本已加入上传队列");
+            self.notify_system(
+                "文本已加入队列",
+                "message.txt 将按顺序上传",
+                SystemNotificationKind::Info,
+            );
         } else {
             self.set_error("文本已加入队列，但未能完整恢复原剪贴板");
+            self.notify_system(
+                "文本已加入队列",
+                "message.txt 已加入，但未能完整恢复原剪贴板",
+                SystemNotificationKind::Warning,
+            );
+        }
+    }
+
+    fn poll_task_notifications(&mut self) {
+        let mut notifications = Vec::new();
+        for task in self.queue.tasks() {
+            let previous = self.task_statuses.insert(task.id, task.status);
+            if previous == Some(task.status) {
+                continue;
+            }
+            match task.status {
+                UploadStatus::Succeeded => notifications.push((
+                    "上传成功".to_owned(),
+                    format!("{} 已上传完成", task.file_name),
+                    SystemNotificationKind::Info,
+                )),
+                UploadStatus::Failed => notifications.push((
+                    "上传失败".to_owned(),
+                    if task.error.is_empty() {
+                        format!("{} 上传失败", task.file_name)
+                    } else {
+                        format!("{}：{}", task.file_name, task.error)
+                    },
+                    SystemNotificationKind::Error,
+                )),
+                _ => {}
+            }
+        }
+        self.task_statuses
+            .retain(|id, _| self.queue.tasks().iter().any(|task| task.id == *id));
+        for (title, message, kind) in notifications {
+            self.notify_system(&title, &message, kind);
         }
     }
 
@@ -769,6 +828,7 @@ impl eframe::App for FileExchangeApp {
     fn logic(&mut self, context: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_external_events(context);
         self.queue.poll();
+        self.poll_task_notifications();
         if let Some(tray) = &self.tray {
             let count = self.queue.active_count();
             let tooltip = if count == 0 {
