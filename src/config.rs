@@ -20,6 +20,8 @@ pub struct AppSettings {
     pub encrypted_token: String,
     pub receiver_users: Vec<String>,
     pub hotkey: String,
+    pub usage_api_base_url: String,
+    pub encrypted_usage_api_key: String,
 }
 
 impl Default for AppSettings {
@@ -29,6 +31,8 @@ impl Default for AppSettings {
             encrypted_token: String::new(),
             receiver_users: Vec::new(),
             hotkey: DEFAULT_HOTKEY.to_owned(),
+            usage_api_base_url: String::new(),
+            encrypted_usage_api_key: String::new(),
         }
     }
 }
@@ -36,6 +40,10 @@ impl Default for AppSettings {
 impl AppSettings {
     pub fn is_configured(&self) -> bool {
         self.validate_without_token().is_ok() && !self.encrypted_token.is_empty()
+    }
+
+    pub fn has_usage_query_config(&self) -> bool {
+        !self.usage_api_base_url.trim().is_empty() && !self.encrypted_usage_api_key.is_empty()
     }
 
     pub fn normalize_receivers(values: impl IntoIterator<Item = String>) -> Vec<String> {
@@ -54,16 +62,32 @@ impl AppSettings {
     }
 
     pub fn validate_without_token(&self) -> Result<()> {
-        let url = Url::parse(self.api_base_url.trim()).context("API 地址格式无效")?;
-        if url.scheme() != "https" || url.host_str().is_none() {
-            bail!("API 地址必须是有效的 HTTPS 地址");
-        }
+        validate_https_url(self.api_base_url.trim(), "API 地址")?;
         if self.receiver_users.is_empty() {
             bail!("请至少填写一个接收人的域账号");
+        }
+        if !self.usage_api_base_url.trim().is_empty() {
+            validate_http_or_https_url(self.usage_api_base_url.trim(), "用量查询地址")?;
         }
         validate_hotkey_text(&self.hotkey)?;
         Ok(())
     }
+}
+
+fn validate_https_url(value: &str, label: &str) -> Result<()> {
+    let url = Url::parse(value).with_context(|| format!("{label}格式无效"))?;
+    if url.scheme() != "https" || url.host_str().is_none() {
+        bail!("{label}必须是有效的 HTTPS 地址");
+    }
+    Ok(())
+}
+
+fn validate_http_or_https_url(value: &str, label: &str) -> Result<()> {
+    let url = Url::parse(value).with_context(|| format!("{label}格式无效"))?;
+    if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+        bail!("{label}必须是有效的 HTTP 或 HTTPS 地址");
+    }
+    Ok(())
 }
 
 pub struct SettingsStore {
@@ -236,6 +260,13 @@ mod tests {
         settings.receiver_users.push("alice".to_owned());
         assert!(settings.validate_without_token().is_ok());
         settings.api_base_url = "http://example.com".to_owned();
+        assert!(settings.validate_without_token().is_err());
+
+        settings.api_base_url = "https://example.com".to_owned();
+        settings.usage_api_base_url = "http://usage.example.com/v1".to_owned();
+        assert!(settings.validate_without_token().is_ok());
+
+        settings.usage_api_base_url = "ftp://usage.example.com/v1".to_owned();
         assert!(settings.validate_without_token().is_err());
     }
 
