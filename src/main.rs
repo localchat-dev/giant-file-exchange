@@ -33,8 +33,8 @@ fn main() -> anyhow::Result<()> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("文件交换助手")
-            .with_inner_size([940.0, 640.0])
-            .with_min_inner_size([760.0, 500.0])
+            .with_inner_size([1080.0, 720.0])
+            .with_min_inner_size([860.0, 560.0])
             .with_icon(eframe::egui::IconData {
                 rgba: icon_rgba(),
                 width: ICON_SIZE,
